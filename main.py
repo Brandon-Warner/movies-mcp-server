@@ -1,17 +1,16 @@
 import os
+import json
 import uvicorn
 import requests
 from dotenv import load_dotenv
-from fastmcp import FastMCP, api_key_auth, HTTPException
+from fastmcp import FastMCP
+from fastmcp.exceptions import ToolError
 
 # Load environment variables from .env file
 load_dotenv()
 
 # --- Configuration ---
-app = FastMCP(
-    # This dependency ensures all incoming requests have the correct API key
-    dependencies=[api_key_auth(os.getenv("MCP_API_KEY"))]
-)
+app = FastMCP()
 NODE_API_URL = "http://localhost:3001/api/movies"
 AUTH0_TOKEN_URL = f"https://{os.getenv('AUTH0_DOMAIN')}/oauth/token"
 AUTH0_CLIENT_ID = os.getenv("AUTH0_CLIENT_ID")
@@ -42,11 +41,10 @@ def get_auth0_token():
         return response.json()["access_token"]
     except requests.exceptions.RequestException as e:
         print(f"Error fetching Auth0 token: {e}")
-        raise HTTPException(status_code=500, detail="Could not authenticate with backend service.")
+        raise ToolError("Could not authenticate with backend service.")
 
-# --- Tool Definition ---
-@app.tool()
-def search_movies(query: str):
+# --- Tool Implementation (before decoration) ---
+def _search_movies_impl(query: str):
     """
     Searches the movie wishlist for a specific movie title.
     """
@@ -83,13 +81,100 @@ def search_movies(query: str):
             
         return " ".join(results)
 
-    except HTTPException as e:
-        # Re-raise known HTTP exceptions
+    except ToolError as e:
+        # Re-raise known tool errors
         raise e
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
-        raise HTTPException(status_code=500, detail="An internal error occurred while searching for movies.")
+        raise ToolError("An internal error occurred while searching for movies.")
+
+# --- Tool Definition ---
+@app.tool()
+def search_movies(query: str):
+    """
+    Searches the movie wishlist for a specific movie title.
+    """
+    return _search_movies_impl(query)
+
+
+# --- Create ASGI app with JSON-RPC middleware ---
+fastmcp_asgi = app.http_app()
+
+# Create wrapper that adds JSON-RPC handling
+async def json_rpc_asgi_app(scope, receive, send):
+    if scope["type"] == "http" and scope["method"] == "POST" and scope["path"] == "/":
+        # Collect the body
+        body_parts = []
+        while True:
+            message = await receive()
+            if message["type"] == "http.request":
+                body_parts.append(message.get("body", b""))
+                if not message.get("more_body", False):
+                    break
+        
+        body = b"".join(body_parts)
+        
+        try:
+            jsonrpc_req = json.loads(body)
+            
+            # Check if this is a JSON-RPC request
+            if jsonrpc_req.get("jsonrpc") == "2.0" and jsonrpc_req.get("method") == "tools/call":
+                tool_name = jsonrpc_req.get("params", {}).get("name")
+                arguments = jsonrpc_req.get("params", {}).get("arguments", {})
+                request_id = jsonrpc_req.get("id")
+                
+                try:
+                    # Call the tool implementation
+                    if tool_name == "search_movies":
+                        result = _search_movies_impl(arguments.get("query", ""))
+                    else:
+                        result = {"error": f"Unknown tool: {tool_name}"}
+                    
+                    # Return JSON-RPC response
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": result
+                    }
+                    response_body = json.dumps(response).encode()
+                    
+                    await send({
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [[b"content-type", b"application/json"]],
+                    })
+                    await send({
+                        "type": "http.response.body",
+                        "body": response_body,
+                    })
+                    return
+                except Exception as e:
+                    response = {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {
+                            "code": -32603,
+                            "message": str(e)
+                        }
+                    }
+                    response_body = json.dumps(response).encode()
+                    
+                    await send({
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [[b"content-type", b"application/json"]],
+                    })
+                    await send({
+                        "type": "http.response.body",
+                        "body": response_body,
+                    })
+                    return
+        except json.JSONDecodeError:
+            pass
+    
+    # Fall back to the FastMCP ASGI app
+    await fastmcp_asgi(scope, receive, send)
 
 # --- Main execution block ---
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(json_rpc_asgi_app, host="0.0.0.0", port=8000)
