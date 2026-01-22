@@ -1,0 +1,22 @@
+{
+  "mcp_version": "1.0",
+  "display_name": "My Movie Wishlist",
+  "tool_id": "movie-wishlist-tool",
+  "description_for_model": "This tool can search a personal movie wishlist. Use it to check if specific movies are on the list and whether they have been marked as 'watched'.",
+  "tools": [
+    {
+      "name": "search_movies",
+      "description": "Searches the movie wishlist for a specific movie title to see if it exists and what its status is (watched or unwatched).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The title of the movie to search for. E.g., 'Inception', 'The Godfather'."
+          }
+        },
+        "required": ["query"]
+      }
+    }
+  ]
+}
