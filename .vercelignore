@@ -15,6 +15,5 @@ build/
 .DS_Store
 .vscode/
 .idea/
-
-# Vercel
-.vercel
+.git/
+local_test_client.py
