@@ -171,4 +171,5 @@ async def json_rpc_asgi_app(scope, receive, send):
     await fastmcp_asgi(scope, receive, send)
 
 # Vercel serverless function handler
-app_handler = json_rpc_asgi_app
+# Export as 'app' for Vercel's ASGI support
+app = json_rpc_asgi_app
