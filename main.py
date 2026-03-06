@@ -88,7 +88,22 @@ def _search_movies_impl(query: str):
         print(f"An unexpected error occurred: {e}")
         raise ToolError("An internal error occurred while searching for movies.")
 
+# --- Tool Implementation for Greeting ---
+def _greet_impl(name: str = "there"):
+    """
+    Generates a friendly greeting message.
+    """
+    print(f"MCP Tool: Generating greeting for '{name}'")
+    return f"Hello, {name}! Welcome to the Movie Wishlist MCP Server. How can I assist you today?"
+
 # --- Tool Definition ---
+@app.tool()
+def greet(name: str = "there"):
+    """
+    Greets the user with a friendly message. Provide a name to personalize the greeting.
+    """
+    return _greet_impl(name)
+
 @app.tool()
 def search_movies(query: str):
     """
@@ -127,6 +142,8 @@ async def json_rpc_asgi_app(scope, receive, send):
                     # Call the tool implementation
                     if tool_name == "search_movies":
                         result = _search_movies_impl(arguments.get("query", ""))
+                    elif tool_name == "greet":
+                        result = _greet_impl(arguments.get("name", "there"))
                     else:
                         result = {"error": f"Unknown tool: {tool_name}"}
                     
